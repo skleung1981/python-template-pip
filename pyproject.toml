@@ -1,0 +1,14 @@
+
+[project]
+name = "project_template"
+version = "1.0.0"
+description = "<It is the project template, please change it in the first commit.>"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
