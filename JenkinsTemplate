@@ -4,83 +4,120 @@ pipeline {
     agent any
 
     environment {
-        NEXUS_GROUP_URL = 'http://nexus-service:8081/cicd/nexus/repository/saturn-python-group/'
-        NEXUS_HOSTED_URL = 'http://nexus-service:8081/cicd/nexus/repository/saturn-python-hosted/'
+        NEXUS_TRUSTED_HOST = 'nexus-service.saturn-cicd.svc.cluster.local'
+        NEXUS_PORT = 8081
+        NEXUS_URI = 'cicd/nexus/repository'
+        NEXUS_SERVICE_HOST = 'nexus-service'
+        PYTHON_HOSTED_URI = 'saturn-python-hosted'
+        PYTHON_GROUP_URI = 'saturn-python-group'
+        NEXUS_GROUP_BUILD_URL = 'http://nexus-service.saturn-cicd.svc.cluster.local:8081/cicd/nexus/repository/saturn-python-group/'
     }
 
     stages {
-        stage('1. Checkout') {
+
+        stage('1. Setup Python 3.14 (Non-root)') {
             steps {
-                echo 'Get Forgejo source code...'
-                checkout scm
+                sh '''
+                    if [ ! -f "$WORKSPACE/python-local/python/bin/python3.14" ]; then
+                        echo "Installing Python locally without root...${WORKSPACE}"
+                        mkdir -p $WORKSPACE/python-local
+                        cd $WORKSPACE/python-local
+
+                        curl -LO https://github.com/astral-sh/python-build-standalone/releases/download/20260814/cpython-3.14.7+20260814-x86_64_v4-unknown-linux-gnu-install_only.tar.gz
+                        tar -xzf cpython-3.14.7+20260814-x86_64_v4-unknown-linux-gnu-install_only.tar.gz
+
+                        mkdir -p $WORKSPACE/.local/bin
+                        ln -sf $WORKSPACE/python-local/python/bin/python3 $WORKSPACE/.local/bin/python3
+                        ln -sf $WORKSPACE/python-local/python/bin/pip3 $WORKSPACE/.local/bin/pip3
+
+                        rm -rf *.tar.gz
+                    fi
+                    export PATH="$WORKSPACE/python-local/python/bin:$PATH"
+
+                    python3 --version
+                    pip3 --version
+                '''
             }
         }
 
-        stage('2. Setup Python Env') {
+        stage('2. Install packages') {
             steps {
-                echo 'Setup Python venv and build tool...'
-                withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
-                                                  usernameVariable: 'NEXUS_USER',
-                                                  passwordVariable: 'NEXUS_PASS')]) {
+                echo 'Install packages...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
+                                                      usernameVariable: 'NEXUS_USER',
+                                                      passwordVariable: 'NEXUS_PASS')]) {
 
-                    sh '''
-                        python3 -m venv venv
-                        . venv/bin/activate
-                        pip install --upgrade pip
-                        pip install build twine
+                      sh '''
+                            export PATH="$WORKSPACE/python-local/python/bin:$PATH"
 
-                        pip install --extra-index-url http://${NEXUS_USER}:${NEXUS_PASS}@nexus-service:8081/cicd/nexus/repository/saturn-python-group/ \
-                                    --trusted-host nexus-service \
+                            pip3 install --no-cache-dir --upgrade pip
+                            pip3 install --no-cache-dir build twine ruff pytest
+
+                            if [ -f requirements.txt ]; then
+                                pip3 install --no-cache-dir \
+                                    --extra-index-url http://${NEXUS_USER}:${NEXUS_PASS}@${NEXUS_TRUSTED_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_GROUP_URI}/ \
+                                    --trusted-host ${NEXUS_TRUSTED_HOST} \
                                     -r requirements.txt
-                    '''
+                            fi
+                        '''
+
+                    }
                 }
             }
         }
 
-        stage('3. Lint & Test') {
+        stage('3. Lint & Test inside Container') {
             steps {
+                echo 'Running ruff and pytest...'
                 sh '''
-                    . venv/bin/activate
+                    export PATH="$WORKSPACE/python-local/python/bin:$PATH"
                     ruff check .
                     pytest --junitxml=report.xml
                 '''
             }
         }
 
-        stage('4. Build Package') {
+        stage('4. Build Package ') {
             steps {
-                echo 'Packing Python project (.whl & .tar.gz)...'
-                sh '''
-                    . venv/bin/activate
+                echo 'Building .whl & .tar.gz...'
+                sh """
+                    export PATH="$WORKSPACE/python-local/python/bin:$PATH"
+
+                    rm -rf dist build *.egg-info
                     python3 -m build
-                '''
+                """
             }
         }
 
         stage('5. Upload to Nexus') {
+            when {
+                branch 'main'
+            }
             steps {
-                echo 'Uploading to Nexus (HTTP)...'
+                echo 'Uploading to Nexus...'
                 withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
                                                   usernameVariable: 'NEXUS_USER',
                                                   passwordVariable: 'NEXUS_PASS')]) {
-                    sh '''
-                        . venv/bin/activate
-                        twine upload --repository-url ${NEXUS_HOSTED_URL} \
-                                     -u ${NEXUS_USER} -p ${NEXUS_PASS} \
-                                     --verbose
-                                     dist/*
-                    '''
+                    sh """
+                        export PATH="$WORKSPACE/python-local/python/bin:$PATH"
+                        python3 twine_non_ssl.py upload \
+                            --repository-url http://${NEXUS_SERVICE_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_HOSTED_URI}/ \
+                            -u ${NEXUS_USER} -p "${NEXUS_PASS}" \
+                            --verbose \
+                            dist/*
+                    """
                 }
             }
         }
     }
 
     post {
-        success {
-            echo 'Python Build is completed and uploaded it to Nexus'
+        always {
+            junit 'report.xml'
         }
-        failure {
-            echo 'Pipeline failed, please check Log。'
+        success {
+            echo 'Pipeline completed successfully!'
         }
     }
 }

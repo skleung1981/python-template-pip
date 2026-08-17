@@ -1,3 +1,3 @@
-# myskl-python-template
+# Python-template
 
 Default Python Project Template
