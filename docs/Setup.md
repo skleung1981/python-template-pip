@@ -7,8 +7,16 @@
 4. Update README.md
 5. Make sure src folder is source root and tests in test root in Pycharm
 6. Rename the project_template under src folder
-7. Update ChangeLOG
+7. Update CHANGELOD.md
 8. Commit and create PR to review.
+
+## Build as docker image
+This project support that you can build it and package it as docker image
+
+1. Rename the DockerfileTempalte to Dockerfile
+2. Update the Dockerfile in the last section
+3. Update the Jenkinsfile again for final output image name (imageName)
+4. Docker image only be build when a tag (e.g. v.1.0.0) is applied. 
 
 ## Get the Python Package from local nexus
 

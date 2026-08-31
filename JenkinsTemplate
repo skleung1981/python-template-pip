@@ -1,6 +1,9 @@
 //Please rename the file to Jenkinsfile in order to run it in the Jenkins
 
 pipeline {
+    tools {
+        dockerTool 'DEFAULT_DOCKER'
+    }
     agent any
 
     environment {
@@ -54,9 +57,9 @@ pipeline {
                             pip3 install --no-cache-dir --upgrade pip
                             pip3 install --no-cache-dir build twine ruff pytest
 
-                            if [ -f requirements.txt ]; then
+                            if [ -f requirements-dev.txt ]; then
                                 pip3 install --no-cache-dir \
-                                    --extra-index-url http://${NEXUS_USER}:${NEXUS_PASS}@${NEXUS_TRUSTED_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_GROUP_URI}/ \
+                                    --extra-index-url http://${NEXUS_USER}:${NEXUS_PASS}@${NEXUS_TRUSTED_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_GROUP_URI}/simple \
                                     --trusted-host ${NEXUS_TRUSTED_HOST} \
                                     -r requirements.txt
                             fi
@@ -110,11 +113,60 @@ pipeline {
                 }
             }
         }
+
+        stage('6. Dockerize (Only on Tag & if Dockerfile exists)') {
+            when {
+                allOf {
+                    buildingTag()
+                    expression { fileExists 'Dockerfile' }
+                }
+            }
+            steps {
+                script {
+                    def imageName = "python-template"
+                    def gitTag = env.TAG_NAME ?: env.BRANCH_NAME
+                    def cleanVersion = gitTag.replaceAll(/^v/, '')
+                    def registry = "saturn:30088"
+                    def fullImageName = "${registry}/${imageName}"
+                    def imageTag = "${fullImageName}:${cleanVersion}"
+                    def latestTag = "${fullImageName}:latest"
+
+                    withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
+                                                     usernameVariable: 'nexus_user',
+                                                     passwordVariable: 'nexus_password'),
+                                                     usernamePassword(credentialsId: 'nexus-cicd-admin-ro',
+                                                     usernameVariable: 'nexus_ro_user',
+                                                     passwordVariable: 'nexus_ro_pass')]) {
+
+                        sh '''
+                            mkdir -p "${WORKSPACE}/.docker-config"
+                            export DOCKER_CONFIG="${WORKSPACE}/.docker-config"
+                            echo "$nexus_password" | docker login ''' + registry + ''' -u "$nexus_user" --password-stdin
+
+                            docker build \
+                                --build-arg NEXUS_HOST='''+ registry + ''' \
+                                --build-arg NEXUS_INDEX=${NEXUS_URI}/${PYTHON_GROUP_URI}/simple \
+                                --build-arg NEXUS_USER="$nexus_ro_user" \
+                                --build-arg NEXUS_PASS="$nexus_ro_pass" \
+                                -t ''' + imageTag + ''' \
+                                -t ''' + latestTag + ''' \
+                                .
+
+                            docker push ''' + imageTag + '''
+                            docker push ''' + latestTag + '''
+
+                            rm -rf "${WORKSPACE}/.docker-config"
+                            docker rmi ''' + imageTag + ' ' + latestTag + ''' || true
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
         always {
-            junit 'report.xml'
+            junit allowEmptyResults: true, testResults: 'report.xml'
         }
         success {
             echo 'Pipeline completed successfully!'
