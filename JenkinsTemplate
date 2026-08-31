@@ -1,5 +1,3 @@
-//Please rename the file to Jenkinsfile in order to run it in the Jenkins
-
 pipeline {
     tools {
         dockerTool 'DEFAULT_DOCKER'
@@ -61,7 +59,7 @@ pipeline {
                                 pip3 install --no-cache-dir \
                                     --extra-index-url http://${NEXUS_USER}:${NEXUS_PASS}@${NEXUS_TRUSTED_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_GROUP_URI}/simple \
                                     --trusted-host ${NEXUS_TRUSTED_HOST} \
-                                    -r requirements.txt
+                                    -r requirements-dev.txt
                             fi
                         '''
 
@@ -81,7 +79,7 @@ pipeline {
             }
         }
 
-        stage('4. Build Package ') {
+        stage('4a. Build Package ') {
             steps {
                 echo 'Building .whl & .tar.gz...'
                 sh """
@@ -90,6 +88,36 @@ pipeline {
                     rm -rf dist build *.egg-info
                     python3 -m build
                 """
+            }
+        }
+
+        stage('4b. Generate SBOM') {
+            steps {
+                echo 'Generating CycloneDX SBOM...'
+                sh '''
+                    export PATH="$WORKSPACE/python-local/python/bin:$PATH"
+                    python3 -m venv .sbom-venv
+                    .sbom-venv/bin/pip install --no-cache-dir cyclonedx-bom==7.2.1
+                    .sbom-venv/bin/cyclonedx-py requirements -i requirements.txt -o bom.json --output-format json
+                    rm -rf .sbom-venv
+                '''
+            }
+        }
+
+        stage('4c. Upload SBOM to Dependency-Track') {
+            steps {
+                echo "In progress"
+//                 withCredentials([string(credentialsId: 'dependency-track-api-key', variable: 'DT_API_KEY')]) {
+//                     sh '''
+//                         curl -X POST "https://saturn/cicd/dependency-track-api/api/v1/bom" \
+//                             -H "X-Api-Key: $DT_API_KEY" \
+//                             -H "Content-Type: multipart/form-data" \
+//                             -F "autoCreate=true" \
+//                             -F "projectName=myskl-numpy-test" \
+//                             -F "projectVersion=''' + cleanVersion + '''" \
+//                             -F "bom=@bom.json"
+//                     '''
+//                 }
             }
         }
 
