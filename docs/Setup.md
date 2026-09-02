@@ -2,7 +2,7 @@
 ## Step after you clone the repo
 
 1. Create a feature branch call feature/first_setup
-2. Rename JenkinsTemplate to Jenkinsfile and remove the first line
+2. Rename JenkinsTemplate to Jenkinsfile and correct the PROJECT_NAME
 3. Update the pyproject.toml
 4. Update README.md
 5. Make sure src folder is source root and tests in test root in Pycharm
@@ -15,8 +15,7 @@ This project support that you can build it and package it as docker image
 
 1. Rename the DockerfileTempalte to Dockerfile
 2. Update the Dockerfile in the last section
-3. Update the Jenkinsfile again for final output image name (imageName)
-4. Docker image only be build when a tag (e.g. v.1.0.0) is applied. 
+3. Docker image only be build when a tag (e.g. v.1.0.0) is applied. 
 
 ## Get the Python Package from local nexus
 

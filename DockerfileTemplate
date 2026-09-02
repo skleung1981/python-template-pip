@@ -16,7 +16,7 @@ ARG NEXUS_PASS
 RUN pip install --no-cache-dir --target=/deps \
         --extra-index-url "https://$NEXUS_USER:$NEXUS_PASS@$NEXUS_HOST/$NEXUS_INDEX/" \
         --trusted-host $NEXUS_HOST \
-        -r requirements_docker.txt
+        -r requirements.txt
 
 COPY . .
 

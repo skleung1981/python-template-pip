@@ -5,13 +5,15 @@ pipeline {
     agent any
 
     environment {
+        PROJECT_NAME = '<INPUT_PROJECT_NAME>'
+        NEXUS_SERVICE_HOST = 'nexus-service'
         NEXUS_TRUSTED_HOST = 'nexus-service.saturn-cicd.svc.cluster.local'
         NEXUS_PORT = 8081
         NEXUS_URI = 'cicd/nexus/repository'
-        NEXUS_SERVICE_HOST = 'nexus-service'
         PYTHON_HOSTED_URI = 'saturn-python-hosted'
         PYTHON_GROUP_URI = 'saturn-python-group'
-        NEXUS_GROUP_BUILD_URL = 'http://nexus-service.saturn-cicd.svc.cluster.local:8081/cicd/nexus/repository/saturn-python-group/'
+        DEPENDENCY_TRACK_API_HOST = 'dependency-track-api-service'
+        DEPENDENCY_TRACK_API_PORT = 8080
     }
 
     stages {
@@ -91,53 +93,42 @@ pipeline {
             }
         }
 
-        stage('4b. Generate SBOM') {
-            steps {
-                echo 'Generating CycloneDX SBOM...'
-                sh '''
-                    export PATH="$WORKSPACE/python-local/python/bin:$PATH"
-                    python3 -m venv .sbom-venv
-                    .sbom-venv/bin/pip install --no-cache-dir cyclonedx-bom==7.2.1
-                    .sbom-venv/bin/cyclonedx-py requirements -i requirements.txt -o bom.json --output-format json
-                    rm -rf .sbom-venv
-                '''
-            }
-        }
-
-        stage('4c. Upload SBOM to Dependency-Track') {
-            steps {
-                echo "In progress"
-//                 withCredentials([string(credentialsId: 'dependency-track-api-key', variable: 'DT_API_KEY')]) {
-//                     sh '''
-//                         curl -X POST "https://saturn/cicd/dependency-track-api/api/v1/bom" \
-//                             -H "X-Api-Key: $DT_API_KEY" \
-//                             -H "Content-Type: multipart/form-data" \
-//                             -F "autoCreate=true" \
-//                             -F "projectName=myskl-numpy-test" \
-//                             -F "projectVersion=''' + cleanVersion + '''" \
-//                             -F "bom=@bom.json"
-//                     '''
-//                 }
-            }
-        }
-
-        stage('5. Upload to Nexus') {
+        stage('5. Upload to Nexus and Generate SBOM') {
             when {
-                branch 'main'
+                buildingTag()
             }
             steps {
-                echo 'Uploading to Nexus...'
-                withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
-                                                  usernameVariable: 'NEXUS_USER',
-                                                  passwordVariable: 'NEXUS_PASS')]) {
-                    sh """
-                        export PATH="$WORKSPACE/python-local/python/bin:$PATH"
-                        python3 twine_non_ssl.py upload \
-                            --repository-url http://${NEXUS_SERVICE_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_HOSTED_URI}/ \
-                            -u ${NEXUS_USER} -p "${NEXUS_PASS}" \
-                            --verbose \
-                            dist/*
-                    """
+                script {
+                    def gitTag = env.TAG_NAME ?: env.BRANCH_NAME
+                    def cleanVersion = gitTag.replaceAll(/^v/, '')
+
+                    echo 'Uploading to Nexus...when it is a tag'
+                    withCredentials([usernamePassword(credentialsId: 'nexus-cicd-admin',
+                                                      usernameVariable: 'NEXUS_USER',
+                                                      passwordVariable: 'NEXUS_PASS'),
+                                                      string(credentialsId: 'DT_API_KEY', variable: 'DT_API_KEY')]) {
+                        sh '''
+                            export PATH="$WORKSPACE/python-local/python/bin:$PATH"
+                            python3 twine_non_ssl.py upload \
+                                --repository-url http://${NEXUS_SERVICE_HOST}:${NEXUS_PORT}/${NEXUS_URI}/${PYTHON_HOSTED_URI}/ \
+                                -u ${NEXUS_USER} -p "${NEXUS_PASS}" \
+                                --verbose \
+                                dist/*
+
+                            python3 -m venv .sbom-venv
+                            .sbom-venv/bin/pip install --no-cache-dir cyclonedx-bom==7.2.1
+                            .sbom-venv/bin/cyclonedx-py requirements -i requirements.txt -o bom.json --output-format json
+                            rm -rf .sbom-venv
+
+                            curl -sS -X POST "http://${DEPENDENCY_TRACK_API_HOST}:${DEPENDENCY_TRACK_API_PORT}/api/v1/bom" \
+                                -H "X-Api-Key: $DT_API_KEY" \
+                                -F "autoCreate=true" \
+                                -F "projectName=${PROJECT_NAME}" \
+                                -F "projectVersion=''' + cleanVersion + '''" \
+                                -F "isLatest=true" \
+                                -F "bom=@bom.json"
+                        '''
+                    }
                 }
             }
         }
@@ -151,7 +142,7 @@ pipeline {
             }
             steps {
                 script {
-                    def imageName = "python-template"
+                    def imageName = env.PROJECT_NAME
                     def gitTag = env.TAG_NAME ?: env.BRANCH_NAME
                     def cleanVersion = gitTag.replaceAll(/^v/, '')
                     def registry = "saturn:30088"
