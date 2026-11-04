@@ -18,12 +18,12 @@ RUN pip install --no-cache-dir --target=/deps \
         --trusted-host $NEXUS_HOST \
         -r requirements.txt
 
-COPY . .
-
 #####################################################################################
 FROM python:3.14-slim
 COPY --from=builder /deps /usr/local/lib/python3.14/site-packages
-COPY --from=builder /build /app
+ENV PYTHONPATH=/app
 WORKDIR /app
 ##### Application level, it is required to update
+# UMCOMMENT BELOW
+#COPY src/<app folder> /app/<app folder>
 CMD ["python3", "--version"]
